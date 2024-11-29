@@ -390,9 +390,12 @@ echo -e "${RED}温馨提醒，在国内的用户如果操作集群拉取镜像�
 
 sudo cp /etc/containerd/config.toml /etc/containerd/config.toml.bak
 sudo sed -i 's/endpoint = \["https:\/\/registry-1.docker.io"\]/endpoint = \["https:\/\/registry-1.docker.io", "https:\/\/dockerhub.icu", "https:\/\/docker.chenby.cn", "https:\/\/docker.1panel.live", "https:\/\/docker.awsl9527.cn", "https:\/\/docker.anyhub.us.kg", "https:\/\/dhub.kubesre.xyz"\]/' /etc/containerd/config.toml
+systemctl restart containerd
 
-echo "${YELLOW}替换镜像源的命令如下，本机以自动替换镜像源！${NC}
+echo -e "${YELLOW}替换镜像源的命令如下请为其他节点替换，本机以自动替换镜像源！${NC}
+
 sudo sed -i 's/endpoint = \["https:\/\/registry-1.docker.io"\]/endpoint = \["https:\/\/registry-1.docker.io", "https:\/\/dockerhub.icu", "https:\/\/docker.chenby.cn", "https:\/\/docker.1panel.live", "https:\/\/docker.awsl9527.cn", "https:\/\/docker.anyhub.us.kg", "https:\/\/dhub.kubesre.xyz"\]/' /etc/containerd/config.toml
+sudo systemctl restart containerd
 "
 echo "感谢使用我的脚本，我是vscle，我们下次见！
 完结撒花！
