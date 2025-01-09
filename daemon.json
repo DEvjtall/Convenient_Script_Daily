@@ -1,0 +1,17 @@
+{
+    "registry-mirrors": [
+        "https://dockerhub.icu",
+        "https://docker.chenby.cn",
+        "https://docker.1panel.live",
+        "https://docker.awsl9527.cn",
+        "https://docker.anyhub.us.kg",
+        "https://dhub.kubesre.xyz"
+        ],
+   "exec-opts": ["native.cgroupdriver=systemd"], 
+   "log-driver": "json-file",
+   "log-opts": {
+        "max-size": "10m",
+                "max-file": "3"
+  }
+}
+
