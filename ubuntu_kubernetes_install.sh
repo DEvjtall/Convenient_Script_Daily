@@ -47,120 +47,134 @@ fi
 
 # 这里编写一个动态时针的函数
 show_dynamic_clock(){
-    local seconds=$1
     local clock="/-\|"
-    for ((i=0;i<seconds;i++));do
-        local index=$((i % 4))
+    local lock_file="/tmp/install_lock" # 定义一个用于进程之间临时通信的临时文件为锁文件
+    touch $lock_file # 创建锁文件
+    exec 9<>$lock_file # 以读写的方式打开文件描述符9关联到锁文件
+    flock 9 # 获取文件锁
+
+    local i=0 
+    while true ;do
+        local index=$(( i % 4 )) # 根据当前秒数来获取动态时钟的索引，每秒都更新索引
         echo -ne "\r[${clock:$index:1}]"
-        sleep 0.2
+        if [ -f "$lock_file.release" ];then # 如果有这个标志着任务完成的文件，就停止时钟循环
+            break
+        fi
+        ((i++))
+        sleep 0.5
     done
     echo -ne "\r[✔]"
+    flock -u 9 # 释放锁文件
+    exec 9>&- # 关闭文件描述符9
+    rm -f $lock_file $lock_file.release # 删除文件和任务完成的标志文件
+}
+
+# 添加 apt 镜像源
+{
+    
+    cp /etc/apt/sources.list /etc/apt/sources.list.bak
+    cat >> /etc/apt/sources.list << EOF
+    deb http://mirrors.aliyun.com/ubuntu/ bionic main restricted universe multiverse
+    deb http://mirrors.aliyun.com/ubuntu/ bionic-security main restricted universe multiverse
+    deb http://mirrors.aliyun.com/ubuntu/ bionic-updates main restricted universe multiverse
+    deb http://mirrors.aliyun.com/ubuntu/ bionic-proposed main restricted universe multiverse
+    deb http://mirrors.aliyun.com/ubuntu/ bionic-backports main restricted universe multiverse
+    deb-src http://mirrors.aliyun.com/ubuntu/ bionic main restricted universe multiverse
+    deb-src http://mirrors.aliyun.com/ubuntu/ bionic-security main restricted universe multiverse
+    deb-src http://mirrors.aliyun.com/ubuntu/ bionic-updates main restricted universe multiverse
+    deb-src http://mirrors.aliyun.com/ubuntu/ bionic-proposed main restricted universe multiverse
+    deb-src http://mirrors.aliyun.com/ubuntu/ bionic-backports main restricted universe multiverse
+EOF
+    apt-get update &>/dev/null
+    
 }
 
 
-apt-get update &>/dev/null
-echo "安装k8s前期依赖"
 {
-    show_dynamic_clock 5
+    show_dynamic_clock
+    pid=$! # 获取时钟运行的PID
+    echo "安装k8s前期依赖" 
     apt-get install -y curl socat conntrack ebtables ipset ipvsadm &>/dev/null
+    touch "/tmp/install_lock.release" 
+    wait $pid
     sleep 1
 } 
 
-echo "关闭防火墙"
+
 {
-    show_dynamic_clock 5
+    show_dynamic_clock
+    pid=$! # 获取时钟运行的PID
+    echo "关闭防火墙"
     systemctl stop ufw &>/dev/null
     systemctl disable ufw &>/dev/null
+    touch "/tmp/install_lock.release"
+    wait $pid
     sleep 1
 } 
 
 
-echo "设置服务器的时间同步"
+
 {
-    show_dynamic_clock 5
+    show_dynamic_clock
+    pid=$! # 获取时钟运行的PID
+    echo "设置服务器的时间同步"
     sudo apt install ntpdate &>/dev/null
     sudo ntpdate -u ntp.aliyun.com &>/dev/null
+    touch "/tmp/install_lock.release"
+    wait $pid
     sleep 1
 } 
 
 sleep 1
-echo "设置中国时间"
+
 {
-    show_dynamic_clock 5   
+    show_dynamic_clock
+    pid=$! # 获取时钟运行的PID
+    echo "设置中国时间" 
     sudo timedatectl set-timezone Asia/Shanghai &>/dev/null
+    touch "/tmp/install_lock.release"
+    pid=$! # 获取安装运行的PID
+    wait $pid
+    sleep 1
 }
 
 {
-    show_dynamic_clock 5
+    show_dynamic_clock
+    pid=$! # 获取时钟运行的PID
     echo "查看当前时间"
     date | while read line; do echo -e "${YELLOW}$line${NC}"; done
+    touch "/tmp/install_lock.release"
+    wait $pid
+    sleep 1
 }
-sleep 1
 
-  echo "允许root用户ssh远程登录"
+
 {
-    show_dynamic_clock 5
+    show_dynamic_clock
+    pid=$! # 获取时钟运行的PID
+    echo "允许root用户ssh远程登录"
     sudo cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak 
     sed -i 's/#PermitRootLogin/PermitRootLogin/' /etc/ssh/sshd_config
     sed -i 's/prohibit-password/yes/' /etc/ssh/sshd_config
     sudo service ssh restart
-    sleep 3
+
+    touch "/tmp/install_lock.release"
+    wait $pid
+    sleep 1
 }
 
-echo "关闭ubuntu的虚拟内存"
+
 {
-    show_dynamic_clock 3
+    show_dynamic_clock
+    pid=$! # 获取时钟运行的PID
+    echo "关闭ubuntu的虚拟内存"
     sudo sed -i 's/^\([^\#].*swap.*\)/#\1/' /etc/fstab &>/dev/null
+
+    touch "/tmp/install_lock.release"
+    wait $pid
     sleep 1
 } 
 
-
-
-# 设置内核参数
-echo "设置内核参数"
-{
-    show_dynamic_clock 3
-cat > /etc/sysctl.d/k8s.conf <<EOF
-net.bridge.bridge-nf-call-ip6tables = 1
-net.bridge.bridge-nf-call-iptables = 1
-net.ipv4.ip_forward = 1
-EOF
-
-}
-sleep 3
-{
-    show_dynamic_clock 4
-    sysctl --system &>/dev/null
-} 
-
-# 安装IPVS
-{
-    show_dynamic_clock 4
-    apt-get install ipset ipvsadm -y &>/dev/null
-} 
-#加载模块
-cat > /etc/modules-load.d/ipvs.conf << EOF  
-ip_vs  
-ip_vs_rr  
-ip_vs_wrr  
-ip_vs_sh  
-nf_conntrack  
-EOF
-# 检查ipvs模块是否配置好
-{
-    show_dynamic_clock 3
-    modprobe --all ip_vs ip_vs_rr ip_vs_wrr ip_vs_sh nf_conntrack &>/dev/null
-    lsmod | grep -e ip_vs -e nf_conntrack &>/dev/null
-} 
-
-
-# 创建Containerd目录软连接
-mkdir -p /data/containerd
-{
-    show_dynamic_clock 2
-    ln -s /data/containerd /var/lib/containerd &>/dev/null
-    sleep 8
-} 
 
 # 等待一下不然等下版本输出乱序
 wait
@@ -372,6 +386,12 @@ if [[ "$node" == *master* ]]; then
         9)
             echo "yaml文件已经修改完毕，下面进行Kubekey的安装步骤"
             ./kk create cluster -f $file_name 2>&1 | tee install_log.txt
+            if [ $? -eq 0 ];then
+                echo ""
+            else 
+                echo  -e  "$YELLOW 你的yaml修改之后的格式有问题的，请重新修改！ $NC"
+                main_menu
+            fi
             ;;
         *)
             echo "无效的选择，请重新输入。"
@@ -385,18 +405,43 @@ main_menu
 wait 
 
 echo -e "Kubernetes已经安装完毕啦！输入${GREEN}kubectl get node${NC}查看节点状态吧！(得等上两三分钟节点才会READY状态)"
+sleep 4;
 
-echo -e "${RED}温馨提醒，在国内的用户如果操作集群拉取镜像要先到${NC}${GREEN}/etc/containerd/config.toml${NC}${RED}上面更改镜像源才能成功${NC}"
 
-sudo cp /etc/containerd/config.toml /etc/containerd/config.toml.bak
-sudo sed -i 's/endpoint = \["https:\/\/registry-1.docker.io"\]/endpoint = \["https:\/\/registry-1.docker.io", "https:\/\/dockerhub.icu", "https:\/\/docker.chenby.cn", "https:\/\/docker.1panel.live", "https:\/\/docker.awsl9527.cn", "https:\/\/docker.anyhub.us.kg", "https:\/\/dhub.kubesre.xyz"\]/' /etc/containerd/config.toml
-systemctl restart containerd
 
-echo -e "${YELLOW}替换镜像源的命令如下请为其他节点替换，本机以自动替换镜像源！${NC}
+{
+    show_dynamic_clock &
+    pid=$!
+    echo "现在为你添加kubectl的命令补全"
+    apt install bash-completion -y
+    source /usr/share/bash-completion/bash_completion
+    source <(kubectl completion bash)
+    kubectl completion bash >/etc/bash_completion.d/kubectl
+    echo '# Enable bash completion
+if [ -f /usr/share/bash-completion/bash_completion ]; then
+   . /usr/share/bash-completion/bash_completion
+fi
 
-sudo sed -i 's/endpoint = \["https:\/\/registry-1.docker.io"\]/endpoint = \["https:\/\/registry-1.docker.io", "https:\/\/dockerhub.icu", "https:\/\/docker.chenby.cn", "https:\/\/docker.1panel.live", "https:\/\/docker.awsl9527.cn", "https:\/\/docker.anyhub.us.kg", "https:\/\/dhub.kubesre.xyz"\]/' /etc/containerd/config.toml
-sudo systemctl restart containerd
-"
+# Enable kubectl completion
+if [ -f /etc/bash_completion.d/kubectl ]; then
+   . /etc/bash_completion.d/kubectl
+fi' >> ~/.bashrc
+    source ~/.bashrc
+
+    touch "/tmp/install_lock.release"
+    wait $pid
+    sleep 1
+}
+
+echo -e "${YELLOW}替换镜像源的命令如下请为其他节点替换，本机以自动替换镜像源！${NC}"
+read -p "现在帮你更换docker/daemon.json文件，输入y替换(默认帮你备份)，n不替换：" choice
+    if [ choice == 'y' ];then
+        mkdir -p /etc/docker > /dev/null
+        touch /etc/docker/daemon.json
+        cp /etc/docker/daemon.json /etc/docker/daemon.json.bak
+        rm /etc/docker/daemon.json
+        cp ./daemon.json /etc/docker/
+    fi
 echo "感谢使用我的脚本，我是vscle，我们下次见！
 完结撒花！
 "
@@ -411,6 +456,14 @@ echo -e "
 "
 
 else
+    read -p "现在帮你更换docker/daemon.json文件，输入y替换(默认帮你备份)，n不替换：" choice
+    if [ choice == 'y' ];then
+        mkdir -p /etc/docker > /dev/null
+        touch /etc/docker/daemon.json
+        cp /etc/docker/daemon.json /etc/docker/daemon.json.bak
+        rm /etc/docker/daemon.json
+        cp ./daemon.json /etc/docker/
+    fi
     echo "该节点不是master节点，上面初始化系统操作已经完成，退出脚本！"
     exit 0
 fi
